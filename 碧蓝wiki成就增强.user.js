@@ -4,12 +4,12 @@
 // @match       https://wiki.biligame.com/blhx/%E5%A4%A7%E5%9E%8B%E4%BD%9C%E6%88%98%E6%88%90%E5%B0%B1%E8%AE%B0%E5%BD%95%E5%9C%B0%E5%9B%BE
 // @grant       none
 // @run-at      document-start
-// @version     1.0
+// @version     1.1
 // @author      8q
-// @description 增加侵蚀度、成就奖励、海域id、海域名称筛选器，添加存/读档功能，禁用导致存档混乱的网络同步（只存不读，如果之后修好了就再启用同步），避免弹出框偏移出地图，去除平移与缩放
+// @description 增加侵蚀度、成就奖励、海域id、海域名称、成就种类、档案筛选器，添加存/读档功能，禁用导致存档混乱的网络同步（只存不读，如果之后修好了就再启用同步），避免弹出框偏移出地图，去除平移与缩放
 // ==/UserScript==
 
-/* globals L mapData mapModel filterSection filterMouseover filterMouseout mapPoints filterClick updateSection mapSize updateMap saveAchievements */
+/* globals L mapData mapModel filterMouseover filterMouseout mapPoints filterClick updateSection mapSize updateMap saveAchievements normalAchievementKeywords safeAchievementKeywords */
 ;(function () {
     'use strict'
     function patch() {
@@ -101,15 +101,54 @@
             158: [5, '指令书', '物资', '魔方', '紫币', '金猫箱'],
             159: [5, '指令书', '物资', '魔方', '深渊5', '金猫箱'],
         }
+        const FILES = {
+            陨石事件: [44, 84, 125, 95, 104, 52],
+            能源革命: [22, 134, 32, 94, 142, 53],
+            科技与生活: [83, 122, 135, 143, 63, 54],
+            生活的变革: [23, 62, 114, 51, 41, 14],
+            魔方军用化: [21, 31, 66, 113, 65, 85],
+            魔方军用化II: [43, 112, 34, 133, 61, 71],
+            '「微光」计划': [81, 132, 123, 105, 91, 64],
+            军备竞赛: [24, 92, 111, 25, 82, 42],
+            冷战升级: [93, 131, 141, 33, 103, 13],
+        }
+        const NORMAL_FILE = '档案（1/3/5）'
+        const SAFE_FILE = '档案（2/4/6）'
+        const SELECTOR_CLASS = 'leaflet-control-layers-selector'
+        const name2file = {}
+        for (const [file, ids] of Object.entries(FILES)) {
+            for (const [i, id] of ids.entries()) {
+                if (!mapData[id]) continue
+                const name = mapData[id][0]
+                name2file[name] = [file, i + 1]
+            }
+        }
         const name2id = {}
         const name2level = {}
         const name2rewards = {}
+        const achievementTypes = {
+            普通海域: [...normalAchievementKeywords, NORMAL_FILE],
+            安全海域: [...safeAchievementKeywords, SAFE_FILE],
+        }
+        const isSafe = {}
+        for (const [safety, achievementType] of Object.entries(achievementTypes)) {
+            isSafe[achievementType] = safety === '安全海域'
+        }
+        const name2AchievementTypes = {}
+        const achievementKeywordsWithoutFile = [...normalAchievementKeywords, ...safeAchievementKeywords]
         for (const [id, [level, ...rewards]] of Object.entries(MAP_DATA_SUPPLEMENT)) {
             if (!mapData[id]) continue
             const name = mapData[id][0]
             name2id[name] = Number(id)
             name2level[name] = level
             name2rewards[name] = rewards
+            name2AchievementTypes[name] = mapData[id].slice(3).map((achievement) => {
+                if (achievement.includes('档案')) {
+                    return name2file[name][1] % 2 === 0 ? SAFE_FILE : NORMAL_FILE
+                } else {
+                    return achievementKeywordsWithoutFile.find((keyword) => achievement.includes(keyword))
+                }
+            })
         }
         // 原来就有的 bug，更新了成就情况后筛选结果不跟着变
         const oldUpdateMap = updateMap
@@ -119,6 +158,7 @@
         }
         // 增加各种筛选器
         const safetyFilterList = L.DomUtil.get('filter-safe-todo-box').parentElement
+        const safetyFilterChildren = [...safetyFilterList.children]
         function createFilterList(type, text) {
             L.DomUtil.create(
                 'div',
@@ -127,41 +167,90 @@
             ).innerText = text
             return L.DomUtil.create('div', `filter-list filter-${type}-list`, safetyFilterList.parentElement)
         }
-        const levelFilterList = createFilterList('level', '侵蚀度：')
-        const rewardFilterList = createFilterList('reward', '未获取的奖励：')
-        const nameIdFilterList = createFilterList('name-id', '海域搜索：')
-        function createFilterBox(parent, type, text, i) {
+        function createFilterBox(parent, type, text = '') {
             const filterBox = L.DomUtil.create('label', null, parent)
-            filterBox.id = `filter-${type}-${i + 1}-box`
-            filterBox.for = `filter-${type}-${i + 1}`
-            filterBox.innerHTML = `<div><input type="checkbox" id="filter-${type}-${
-                i + 1
-            }" class="leaflet-control-layers-selector"><span>${text}</span></div>`
-            return L.DomUtil.get(`filter-${type}-${i + 1}`)
+            filterBox.id = `filter-${type}-box`
+            filterBox.for = `filter-${type}`
+            if (text) filterBox.innerText = text
+            return filterBox
         }
+        function createFilterCheckbox(parent, type, text) {
+            const filterBox = createFilterBox(parent, type)
+            filterBox.innerHTML = `<div><input type="checkbox" id="filter-${type}" class="${SELECTOR_CLASS}"><span>${text}</span></div>`
+            return L.DomUtil.get(`filter-${type}`)
+        }
+        function createOption(parent, value, text = value) {
+            const option = L.DomUtil.create('option', null, parent)
+            option.value = value
+            option.innerText = text
+            return option
+        }
+        function createSelect(parent) {
+            const filterSelect = L.DomUtil.create('select', SELECTOR_CLASS, parent)
+            createOption(filterSelect, '', '(未选择)')
+            return filterSelect
+        }
+        // 侵蚀度
+        const levelFilterList = createFilterList('level', '侵蚀度：')
         const levelFilterBoxes = new Array(LEVEL_COUNT)
             .fill()
-            .map((_, i) => createFilterBox(levelFilterList, 'level', `侵蚀${i + 1}`, i))
-        const rewardFilterBoxes = ALL_REWARDS.map((reward, i) => createFilterBox(rewardFilterList, 'reward', reward, i))
-        const nameIdFilterBoxes = [
+            .map((_, i) => createFilterCheckbox(levelFilterList, `level-${i + 1}`, `侵蚀${i + 1}`))
+        // 未获取的奖励
+        const rewardFilterList = createFilterList('reward', '未获取的奖励：')
+        const rewardFilterBoxes = ALL_REWARDS.map((reward, i) =>
+            createFilterCheckbox(rewardFilterList, `reward-${i + 1}`, reward),
+        )
+        // 海域搜索
+        const searchFilterList = createFilterList('name-id', '海域搜索：')
+        const searchFilterBoxes = [
             ['name', '海域名称：', null],
             ['id', '海域编号：', '^\\d+$'],
         ].map(([type, text, pattern]) => {
-            const filterBox = L.DomUtil.create('label', null, nameIdFilterList)
-            filterBox.id = `filter-${type}-box`
-            filterBox.for = `filter-${type}`
-            filterBox.innerText = text
-            const filterInput = L.DomUtil.create('input', 'leaflet-control-layers-selector', filterBox)
+            const filterBox = createFilterBox(searchFilterList, type, text)
+            const filterInput = L.DomUtil.create('input', SELECTOR_CLASS, filterBox)
             filterInput.type = 'text'
             filterInput.id = `filter-${type}`
-            filterInput.pattern = pattern
+            if (pattern) filterInput.pattern = pattern
             return filterInput
         })
-        const safetyFilter = filterSection
+        // 档案
+        const fileFilterBoxes = [
+            ['file-name', '档案名称：', Object.keys(FILES)],
+            ['file-index', '档案序号：', [1, 2, 3, 4, 5, 6]],
+        ].map(([type, text, options]) => {
+            const filterBox = createFilterBox(searchFilterList, type, text)
+            const filterSelect = createSelect(filterBox)
+            for (const option of options) {
+                createOption(filterSelect, option)
+            }
+            return filterSelect
+        })
+        // 未完成成就具体类型
+        const achievementTypeSelect = (() => {
+            const filterBox = createFilterBox(safetyFilterList, 'achievement', '具体类型：')
+            const filterSelect = createSelect(filterBox)
+            for (const [group, types] of Object.entries(achievementTypes)) {
+                const optgroup = L.DomUtil.create('optgroup', null, filterSelect)
+                optgroup.label = group
+                for (const type of types) {
+                    createOption(optgroup, type)
+                }
+            }
+            return filterSelect
+        })()
         const filters = {
             safety: {
                 checked: false,
-                filter: safetyFilter,
+                // 原来的筛选函数里没有考虑档案，这里修个 bug
+                filter(section) {
+                    const achievementTypes = name2AchievementTypes[section.name]
+                    for (const [i, isCompleted] of section.completed.entries()) {
+                        if (isCompleted) continue
+                        if (isSafe[achievementTypes[i]] ? mapModel.filters.safeTodo : mapModel.filters.normalTodo)
+                            return true
+                    }
+                    return false
+                },
                 update() {
                     mapModel.filters.safeTodo = L.DomUtil.get('filter-safe-todo').checked
                     mapModel.filters.normalTodo = L.DomUtil.get('filter-normal-todo').checked
@@ -197,7 +286,7 @@
                     return section.name.includes(mapModel.filters.name)
                 },
                 update() {
-                    mapModel.filters.name = nameIdFilterBoxes[0].value
+                    mapModel.filters.name = searchFilterBoxes[0].value
                     this.checked = !!mapModel.filters.name
                 },
             },
@@ -207,9 +296,44 @@
                     return name2id[section.name] === mapModel.filters.id
                 },
                 update() {
-                    const value = nameIdFilterBoxes[1].value
+                    const value = searchFilterBoxes[1].value
                     mapModel.filters.id = Number(value)
                     this.checked = !!value && !Number.isNaN(mapModel.filters.id)
+                },
+            },
+            achievement: {
+                checked: false,
+                filter(section) {
+                    const achievementTypes = name2AchievementTypes[section.name]
+                    for (const [i, isCompleted] of section.completed.entries()) {
+                        if (isCompleted) continue
+                        if (achievementTypes[i] === mapModel.filters.achievementType) return true
+                    }
+                    return false
+                },
+                update() {
+                    mapModel.filters.achievementType = achievementTypeSelect.value
+                    this.checked = !!mapModel.filters.achievementType
+                },
+            },
+            fileType: {
+                checked: false,
+                filter(section) {
+                    return name2file[section.name] && name2file[section.name][0] === mapModel.filters.fileType
+                },
+                update() {
+                    mapModel.filters.fileType = fileFilterBoxes[0].value
+                    this.checked = !!mapModel.filters.fileType
+                },
+            },
+            fileIndex: {
+                checked: false,
+                filter(section) {
+                    return name2file[section.name] && name2file[section.name][1] === mapModel.filters.fileIndex
+                },
+                update() {
+                    mapModel.filters.fileIndex = Number(fileFilterBoxes[1].value)
+                    this.checked = !!mapModel.filters.fileIndex
                 },
             },
         }
@@ -250,17 +374,18 @@
                 mouseout: filterMouseout,
             })
         }
-        for (const list of [safetyFilterList, levelFilterList, rewardFilterList]) {
-            for (const box of list.children) {
-                L.DomEvent.on(box, {
-                    mouseover: newFilterMouseover.bind(null, L.DomUtil.get(box.id.slice(0, -4))),
-                    mouseout: filterChange,
-                    change: filterChange,
-                })
-            }
+        for (const box of [...safetyFilterChildren, ...levelFilterList.children, ...rewardFilterList.children]) {
+            L.DomEvent.on(box, {
+                mouseover: newFilterMouseover.bind(null, L.DomUtil.get(box.id.slice(0, -4))),
+                mouseout: filterChange,
+                change: filterChange,
+            })
         }
-        for (const box of nameIdFilterBoxes) {
+        for (const box of searchFilterBoxes) {
             L.DomEvent.on(box, 'input paste change', filterChange)
+        }
+        for (const box of [achievementTypeSelect, ...fileFilterBoxes]) {
+            L.DomEvent.on(box, 'change', filterChange)
         }
         // 备份 / 读取存档
         const collapseList = document.getElementsByClassName('leaflet-control-layers-overlays')[0].parentElement
@@ -342,6 +467,15 @@
         // 自定义样式
         document.head.appendChild(document.createElement('style')).appendChild(
             document.createTextNode(`
+            #filter-name {
+                max-width: 90px;
+            }
+            #filter-id {
+                max-width: 30px;
+            }
+            #alworldmap input:invalid {
+                border-color: rgba(255, 0, 0, 0.5);
+            }
             /* 存/读档按钮 */
             .achievement-backup-load {
                 display: flex;
@@ -415,7 +549,6 @@
     }
     // 下面是引用的库，用来调整弹出框位置
     function initRrose() {
-
         /*
   Copyright (c) 2012 Eric S. Theise
   
