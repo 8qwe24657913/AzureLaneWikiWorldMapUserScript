@@ -4,9 +4,9 @@
 // @match       https://wiki.biligame.com/blhx/%E5%A4%A7%E5%9E%8B%E4%BD%9C%E6%88%98%E6%88%90%E5%B0%B1%E8%AE%B0%E5%BD%95%E5%9C%B0%E5%9B%BE
 // @grant       none
 // @run-at      document-start
-// @version     1.1
+// @version     1.1.1
 // @author      8q
-// @description 增加侵蚀度、成就奖励、海域id、海域名称、成就种类、档案筛选器，添加存/读档功能，禁用导致存档混乱的网络同步（只存不读，如果之后修好了就再启用同步），避免弹出框偏移出地图，去除平移与缩放
+// @description 增加侵蚀度、成就奖励、海域id、海域名称、成就种类、档案筛选器，添加存/读档功能，避免弹出框偏移出地图，去除平移与缩放
 // ==/UserScript==
 
 /* globals L mapData mapModel filterMouseover filterMouseout mapPoints filterClick updateSection mapSize updateMap saveAchievements normalAchievementKeywords safeAchievementKeywords */
@@ -517,6 +517,7 @@
         }
         updateMap()
     }
+    // eslint-disable-next-line no-unused-vars
     function replaceLoadAchievements() {
         window.loadAchievements = loadAchievements
     }
@@ -533,7 +534,7 @@
                     enumerable: true,
                     configurable: true,
                 })
-                replaceLoadAchievements()
+                // replaceLoadAchievements()
                 // 等初始化完了再执行 patch
                 queueMicrotask(patch)
             },
@@ -542,9 +543,9 @@
         })
     } else {
         // 晚于地图初始化
-        replaceLoadAchievements()
+        // replaceLoadAchievements()
         // 执行时机晚则需要手动读取本地存档以更新地图
-        updateAchievements(loadAchievements())
+        // updateAchievements(loadAchievements())
         patch()
     }
     // 下面是引用的库，用来调整弹出框位置
