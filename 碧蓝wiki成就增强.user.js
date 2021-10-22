@@ -4,7 +4,7 @@
 // @match       https://wiki.biligame.com/blhx/%E5%A4%A7%E5%9E%8B%E4%BD%9C%E6%88%98%E6%88%90%E5%B0%B1%E8%AE%B0%E5%BD%95%E5%9C%B0%E5%9B%BE
 // @grant       none
 // @run-at      document-start
-// @version     1.1.1
+// @version     1.1.2
 // @author      8q
 // @description 增加侵蚀度、成就奖励、海域id、海域名称、成就种类、档案筛选器，添加存/读档功能，避免弹出框偏移出地图，去除平移与缩放
 // ==/UserScript==
@@ -132,7 +132,9 @@
         }
         const isSafe = {}
         for (const [safety, achievementType] of Object.entries(achievementTypes)) {
-            isSafe[achievementType] = safety === '安全海域'
+            for (const achievement of achievementType) {
+                isSafe[achievement] = safety === '安全海域'
+            }
         }
         const name2AchievementTypes = {}
         const achievementKeywordsWithoutFile = [...normalAchievementKeywords, ...safeAchievementKeywords]
